@@ -201,7 +201,8 @@ defmodule GenRMQ.Consumer do
   }
   ```
   """
-  @callback handle_error(message :: %GenRMQ.Message{}, reason :: atom() | {struct(), list()}) :: :ok
+  @callback handle_error(message :: %GenRMQ.Message{}, reason :: atom() | {struct(), list()}) ::
+              :ok
 
   ##############################################################################
   # GenRMQ.Consumer API
@@ -270,7 +271,10 @@ defmodule GenRMQ.Consumer do
   `requeue` - indicates if message should be requeued
   """
   @spec reject(message :: %GenRMQ.Message{}, requeue :: boolean) :: :ok
-  def reject(%Message{channel: channel, attributes: %{delivery_tag: tag}} = message, requeue \\ false) do
+  def reject(
+        %Message{channel: channel, attributes: %{delivery_tag: tag}} = message,
+        requeue \\ false
+      ) do
     Telemetry.emit_message_reject_event(message, requeue)
 
     Basic.reject(channel, tag, requeue: requeue)
@@ -350,7 +354,8 @@ defmodule GenRMQ.Consumer do
 
   @doc false
   @impl GenServer
-  def handle_info({ref, _task_result}, %{running_tasks: running_tasks} = state) when is_reference(ref) do
+  def handle_info({ref, _task_result}, %{running_tasks: running_tasks} = state)
+      when is_reference(ref) do
     # Task completed successfully, update the running task map and state
     Process.demonitor(ref, [:flush])
 
@@ -369,7 +374,8 @@ defmodule GenRMQ.Consumer do
 
   @doc false
   @impl GenServer
-  def handle_info({:kill, task_reference}, %{running_tasks: running_tasks} = state) when is_reference(task_reference) do
+  def handle_info({:kill, task_reference}, %{running_tasks: running_tasks} = state)
+      when is_reference(task_reference) do
     # The task has timed out, kill the Task process which will trigger a :DOWN event that
     # is handled by a previous `handle_info/2` callback
     %MessageTask{task: %Task{pid: pid}} = Map.get(running_tasks, task_reference)
@@ -403,13 +409,22 @@ defmodule GenRMQ.Consumer do
   @impl GenServer
   def handle_info(
         {:basic_deliver, payload, attributes},
-        %{module: module, running_tasks: running_tasks, handle_message_timeout: handle_message_timeout} = state
+        %{
+          module: module,
+          running_tasks: running_tasks,
+          handle_message_timeout: handle_message_timeout
+        } = state
       ) do
     %{delivery_tag: tag, routing_key: routing_key, redelivered: redelivered} = attributes
-    Logger.debug("[#{module}]: Received message. Tag: #{tag}, routing key: #{routing_key}, redelivered: #{redelivered}")
+
+    Logger.debug(
+      "[#{module}]: Received message. Tag: #{tag}, routing key: #{routing_key}, redelivered: #{redelivered}"
+    )
 
     if redelivered do
-      Logger.debug("[#{module}]: Redelivered payload for message. Tag: #{tag}, payload: #{payload}")
+      Logger.debug(
+        "[#{module}]: Redelivered payload for message. Tag: #{tag}, payload: #{payload}"
+      )
     end
 
     message = Message.create(attributes, payload, state.in)
@@ -417,7 +432,9 @@ defmodule GenRMQ.Consumer do
     updated_state =
       case handle_message(message, state) do
         %Task{ref: task_reference} = task ->
-          timeout_reference = Process.send_after(self(), {:kill, task_reference}, handle_message_timeout)
+          timeout_reference =
+            Process.send_after(self(), {:kill, task_reference}, handle_message_timeout)
+
           message_task = MessageTask.create(task, timeout_reference, message)
           %{state | running_tasks: Map.put(running_tasks, task_reference, message_task)}
 
@@ -426,6 +443,12 @@ defmodule GenRMQ.Consumer do
       end
 
     {:noreply, updated_state}
+  end
+
+  @doc false
+  @impl GenServer
+  def handle_info({:EXIT, _pid, {:name_conflict, _, _, _}}, state) do
+    {:stop, :normal, state}
   end
 
   @doc false
@@ -450,10 +473,15 @@ defmodule GenRMQ.Consumer do
 
   @doc false
   @impl GenServer
-  def terminate({{:shutdown, {:server_initiated_close, error_code, reason}}, _}, %{module: module} = state) do
+  def terminate(
+        {{:shutdown, {:server_initiated_close, error_code, reason}}, _},
+        %{module: module} = state
+      ) do
     await_running_tasks(state)
 
-    Logger.error("[#{module}]: Terminating consumer, error_code: #{inspect(error_code)}, reason: #{inspect(reason)}")
+    Logger.error(
+      "[#{module}]: Terminating consumer, error_code: #{inspect(error_code)}, reason: #{inspect(reason)}"
+    )
   end
 
   @doc false
@@ -517,7 +545,16 @@ defmodule GenRMQ.Consumer do
     rescue
       reason ->
         full_error = {reason, __STACKTRACE__}
-        Telemetry.emit_message_exception_event(module, message, start_time, :error, reason, __STACKTRACE__)
+
+        Telemetry.emit_message_exception_event(
+          module,
+          message,
+          start_time,
+          :error,
+          reason,
+          __STACKTRACE__
+        )
+
         apply(module, :handle_error, [message, full_error])
         :error
     end
@@ -549,7 +586,15 @@ defmodule GenRMQ.Consumer do
 
     case Connection.open(config[:connection]) do
       {:ok, conn} ->
-        Telemetry.emit_connection_stop_event(start_time, module, attempt, queue, exchange, routing_key)
+        Telemetry.emit_connection_stop_event(
+          start_time,
+          module,
+          attempt,
+          queue,
+          exchange,
+          routing_key
+        )
+
         Process.monitor(conn.pid)
         Map.put(state, :conn, conn)
 
@@ -559,7 +604,15 @@ defmodule GenRMQ.Consumer do
             "#{inspect(strip_key(config, :connection))}, reason #{inspect(e)}"
         )
 
-        Telemetry.emit_connection_stop_event(start_time, module, attempt, queue, exchange, routing_key, e)
+        Telemetry.emit_connection_stop_event(
+          start_time,
+          module,
+          attempt,
+          queue,
+          exchange,
+          routing_key,
+          e
+        )
 
         retry_delay_fn = config[:retry_delay_function] || (&linear_delay/1)
         next_attempt = attempt + 1
@@ -596,7 +649,15 @@ defmodule GenRMQ.Consumer do
     end
 
     Basic.qos(chan, prefetch_count: prefetch_count)
-    setup_queue(queue_config.name, queue_config.options, chan, config[:exchange], config[:routing_key])
+
+    setup_queue(
+      queue_config.name,
+      queue_config.options,
+      chan,
+      config[:exchange],
+      config[:routing_key]
+    )
+
     consumer_tag = apply(module, :consumer_tag, [])
     {:ok, _consumer_tag} = Basic.consume(chan, queue_config.name, nil, consumer_tag: consumer_tag)
     state
