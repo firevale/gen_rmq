@@ -417,14 +417,10 @@ defmodule GenRMQ.Consumer do
       ) do
     %{delivery_tag: tag, routing_key: routing_key, redelivered: redelivered} = attributes
 
-    Logger.debug(
-      "[#{module}]: Received message. Tag: #{tag}, routing key: #{routing_key}, redelivered: #{redelivered}"
-    )
+    Logger.debug("[#{module}]: Received message. Tag: #{tag}, routing key: #{routing_key}, redelivered: #{redelivered}")
 
     if redelivered do
-      Logger.debug(
-        "[#{module}]: Redelivered payload for message. Tag: #{tag}, payload: #{payload}"
-      )
+      Logger.debug("[#{module}]: Redelivered payload for message. Tag: #{tag}, payload: #{payload}")
     end
 
     message = Message.create(attributes, payload, state.in)
@@ -432,8 +428,7 @@ defmodule GenRMQ.Consumer do
     updated_state =
       case handle_message(message, state) do
         %Task{ref: task_reference} = task ->
-          timeout_reference =
-            Process.send_after(self(), {:kill, task_reference}, handle_message_timeout)
+          timeout_reference = Process.send_after(self(), {:kill, task_reference}, handle_message_timeout)
 
           message_task = MessageTask.create(task, timeout_reference, message)
           %{state | running_tasks: Map.put(running_tasks, task_reference, message_task)}
@@ -447,7 +442,8 @@ defmodule GenRMQ.Consumer do
 
   @doc false
   @impl GenServer
-  def handle_info({:EXIT, _pid, {:name_conflict, _, _, _}}, state) do
+  def handle_info({:EXIT, _pid, {:name_conflict, _, _, _}}, %{module: module} = state) do
+    Logger.debug("[#{module}]: Terminating consumer due to name conflict")
     {:stop, :normal, state}
   end
 
@@ -479,9 +475,7 @@ defmodule GenRMQ.Consumer do
       ) do
     await_running_tasks(state)
 
-    Logger.error(
-      "[#{module}]: Terminating consumer, error_code: #{inspect(error_code)}, reason: #{inspect(reason)}"
-    )
+    Logger.error("[#{module}]: Terminating consumer, error_code: #{inspect(error_code)}, reason: #{inspect(reason)}")
   end
 
   @doc false
